@@ -1,25 +1,35 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-
-const quizzesDir = path.join(process.cwd(), "data", "quizzes");
+import { db } from "@/lib/db";
+import { quizzes, questions } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const filePath = path.join(quizzesDir, `${id}.json`);
-
-  if (!fs.existsSync(filePath)) {
-    return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
-  }
 
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const quiz = JSON.parse(content);
-    return NextResponse.json(quiz);
+    const [quiz] = await db
+      .select()
+      .from(quizzes)
+      .where(eq(quizzes.id, parseInt(id)));
+
+    if (!quiz) {
+      return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
+    }
+
+    const quizQuestions = await db
+      .select()
+      .from(questions)
+      .where(eq(questions.quizId, parseInt(id)));
+
+    return NextResponse.json({
+      ...quiz,
+      questions: quizQuestions,
+    });
   } catch (error) {
+    console.error("Error fetching quiz:", error);
     return NextResponse.json(
       { error: "Failed to fetch quiz" },
       { status: 500 }
@@ -32,11 +42,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const filePath = path.join(quizzesDir, `${id}.json`);
-
-  if (!fs.existsSync(filePath)) {
-    return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
-  }
 
   try {
     const body = await request.json();
@@ -55,24 +60,40 @@ export async function POST(
       );
     }
 
-    const content = fs.readFileSync(filePath, "utf-8");
-    const quiz = JSON.parse(content);
-
-    const newQuestion = {
-      id: Date.now().toString(),
-      text,
-      options,
-      correctAnswer,
-      explanation,
-    };
-
-    quiz.questions.push(newQuestion);
-    fs.writeFileSync(filePath, JSON.stringify(quiz, null, 2));
+    const [newQuestion] = await db
+      .insert(questions)
+      .values({
+        quizId: parseInt(id),
+        text,
+        options,
+        correctAnswer,
+        explanation,
+      })
+      .returning();
 
     return NextResponse.json(newQuestion, { status: 201 });
   } catch (error) {
+    console.error("Error adding question:", error);
     return NextResponse.json(
       { error: "Failed to add question" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  try {
+    await db.delete(quizzes).where(eq(quizzes.id, parseInt(id)));
+    return NextResponse.json({ message: "Quiz deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting quiz:", error);
+    return NextResponse.json(
+      { error: "Failed to delete quiz" },
       { status: 500 }
     );
   }

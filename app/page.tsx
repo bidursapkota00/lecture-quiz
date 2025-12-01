@@ -11,8 +11,10 @@ import {
   CardTitle,
   CardFooter,
 } from "@/components/ui/card";
-import { PlusCircle, BookOpen, Edit, Loader2 } from "lucide-react";
+import { PlusCircle, BookOpen, Edit, Loader2, LogOut } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { isAuthenticated, clearAuth } from "@/lib/auth";
 
 interface QuizSummary {
   id: string;
@@ -22,12 +24,23 @@ interface QuizSummary {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [quizzes, setQuizzes] = useState<QuizSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
+    const authStatus = isAuthenticated();
+    setIsAuth(authStatus);
     fetchQuizzes();
   }, []);
+
+  const handleLogout = () => {
+    clearAuth();
+    setIsAuth(false);
+    toast.success("Logged out successfully");
+    router.push("/login");
+  };
 
   const fetchQuizzes = async () => {
     try {
@@ -57,15 +70,39 @@ export default function Home() {
               Select a lecture to start the quiz or create a new one.
             </p>
           </div>
-          <Link href="/create">
-            <Button
-              size="lg"
-              className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold"
-            >
-              <PlusCircle className="mr-2 h-5 w-5" />
-              Create New Quiz
-            </Button>
-          </Link>
+          <div className="flex gap-3">
+            {isAuth ? (
+              <>
+                <Link href="/create">
+                  <Button
+                    size="lg"
+                    className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold"
+                  >
+                    <PlusCircle className="mr-2 h-5 w-5" />
+                    Create New Quiz
+                  </Button>
+                </Link>
+                <Button
+                  onClick={handleLogout}
+                  size="lg"
+                  variant="outline"
+                  className="border-red-600 text-red-400 hover:bg-red-950"
+                >
+                  <LogOut className="mr-2 h-5 w-5" />
+                  Logout
+                </Button>
+              </>
+            ) : (
+              <Link href="/login">
+                <Button
+                  size="lg"
+                  className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold"
+                >
+                  Login
+                </Button>
+              </Link>
+            )}
+          </div>
         </div>
 
         {loading ? (
