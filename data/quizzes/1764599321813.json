@@ -1,0 +1,31 @@
+{
+  "id": "1764599321813",
+  "title": "OS: Function of OS",
+  "description": "",
+  "questions": [
+    {
+      "id": "1764599363851",
+      "text": "What is what",
+      "options": [
+        "why",
+        "how",
+        "not what",
+        "what"
+      ],
+      "correctAnswer": "what",
+      "explanation": "what is what"
+    },
+    {
+      "id": "1764599404476",
+      "text": "why is what",
+      "options": [
+        "nothing",
+        "all",
+        "because what",
+        "what"
+      ],
+      "correctAnswer": "because what",
+      "explanation": "because of what"
+    }
+  ]
+}
