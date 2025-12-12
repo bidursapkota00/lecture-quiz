@@ -23,6 +23,7 @@ import {
   FolderPlus,
   X,
   Plus,
+  Trash2,
 } from "lucide-react";
 import {
   Dialog,
@@ -61,6 +62,7 @@ export default function Home() {
   const [newSubjectDescription, setNewSubjectDescription] = useState("");
   const [isSubjectDialogOpen, setIsSubjectDialogOpen] = useState(false);
   const [submittingSubject, setSubmittingSubject] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
 
   useEffect(() => {
     const authStatus = isAuthenticated();
@@ -103,14 +105,19 @@ export default function Home() {
     }
   };
 
-  const handleCreateSubject = async (e: React.FormEvent) => {
+  const handleSubjectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubjectName.trim()) return;
 
     setSubmittingSubject(true);
     try {
-      const res = await fetch("/api/subjects", {
-        method: "POST",
+      const url = editingSubject
+        ? `/api/subjects/${editingSubject.id}`
+        : "/api/subjects";
+      const method = editingSubject ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newSubjectName,
@@ -119,20 +126,67 @@ export default function Home() {
       });
 
       if (res.ok) {
-        toast.success("Subject created successfully");
+        toast.success(
+          `Subject ${editingSubject ? "updated" : "created"} successfully`
+        );
         setNewSubjectName("");
         setNewSubjectDescription("");
+        setEditingSubject(null);
         setIsSubjectDialogOpen(false);
         fetchSubjects();
       } else {
         const data = await res.json();
-        toast.error(data.error || "Failed to create subject");
+        toast.error(
+          data.error ||
+            `Failed to ${editingSubject ? "update" : "create"} subject`
+        );
       }
     } catch (error) {
       toast.error("An error occurred");
     } finally {
       setSubmittingSubject(false);
     }
+  };
+
+  const handleDeleteSubject = async (
+    e: React.MouseEvent,
+    subjectId: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (
+      !confirm(
+        "Are you sure you want to delete this subject? Associated quizzes will be uncategorized."
+      )
+    )
+      return;
+
+    try {
+      const res = await fetch(`/api/subjects/${subjectId}`, {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        toast.success("Subject deleted successfully");
+        fetchSubjects();
+        fetchQuizzes();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to delete subject");
+      }
+    } catch (error) {
+      toast.error("An error occurred");
+    }
+  };
+
+  const openEditDialog = (e: React.MouseEvent, subject: Subject) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingSubject(subject);
+    setNewSubjectName(subject.name);
+    setNewSubjectDescription(subject.description || "");
+    setIsSubjectDialogOpen(true);
   };
 
   return (
@@ -152,7 +206,14 @@ export default function Home() {
               <>
                 <Dialog
                   open={isSubjectDialogOpen}
-                  onOpenChange={setIsSubjectDialogOpen}
+                  onOpenChange={(open) => {
+                    setIsSubjectDialogOpen(open);
+                    if (!open) {
+                      setEditingSubject(null);
+                      setNewSubjectName("");
+                      setNewSubjectDescription("");
+                    }
+                  }}
                 >
                   <DialogTrigger asChild>
                     <Button
@@ -166,13 +227,16 @@ export default function Home() {
                   </DialogTrigger>
                   <DialogContent>
                     <DialogHeader>
-                      <DialogTitle>Create New Subject</DialogTitle>
+                      <DialogTitle>
+                        {editingSubject ? "Edit Subject" : "Create New Subject"}
+                      </DialogTitle>
                       <DialogDescription>
-                        organize your quizzes by creating a new subject
-                        category.
+                        {editingSubject
+                          ? "Update the subject details."
+                          : "Organize your quizzes by creating a new subject category."}
                       </DialogDescription>
                     </DialogHeader>
-                    <form onSubmit={handleCreateSubject}>
+                    <form onSubmit={handleSubjectSubmit}>
                       <div className="grid gap-4 py-4">
                         <div className="grid gap-2">
                           <Label htmlFor="name">Subject Name</Label>
@@ -209,12 +273,14 @@ export default function Home() {
                           {submittingSubject ? (
                             <>
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Creating...
+                              {editingSubject ? "Updating..." : "Creating..."}
                             </>
                           ) : (
                             <>
                               <Plus className="mr-2 h-4 w-4" />
-                              Create Subject
+                              {editingSubject
+                                ? "Update Subject"
+                                : "Create Subject"}
                             </>
                           )}
                         </Button>
@@ -304,10 +370,30 @@ export default function Home() {
                         {count} Quizzes
                       </div>
                     </CardContent>
-                    <CardFooter>
+                    <CardFooter className="flex justify-between items-center">
                       <span className="text-sm text-cyan-500 font-medium flex items-center group-hover:underline">
                         View Quizzes <BookOpen className="ml-2 h-4 w-4" />
                       </span>
+                      {isAuth && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 border-cyan-600 text-cyan-400 hover:bg-cyan-950"
+                            onClick={(e) => openEditDialog(e, subject)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 border-red-600 text-red-400 hover:bg-red-950"
+                            onClick={(e) => handleDeleteSubject(e, subject.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
                     </CardFooter>
                   </Card>
                 </Link>
