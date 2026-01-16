@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { isAuthenticated } from "@/lib/auth";
 
 interface Question {
   id: string;
@@ -71,6 +72,7 @@ export default function QuizPage({
   // Quiz Data & State
   const [quiz, setQuiz] = useState<QuizData | null>(null);
   const [quizState, setQuizState] = useState<QuizState>("loading");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // User Details
   const [userDetails, setUserDetails] = useState<UserDetails>({
@@ -94,6 +96,7 @@ export default function QuizPage({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    setIsAdmin(isAuthenticated());
     fetchQuiz();
   }, [id]);
 
@@ -152,7 +155,7 @@ export default function QuizPage({
       if (res.ok) {
         const data = await res.json();
         setQuiz(data);
-        if (!data.isActive) {
+        if (!data.isActive && !isAuthenticated()) {
           setQuizState("inactive");
         } else {
           setQuizState("entry_form");
@@ -167,18 +170,20 @@ export default function QuizPage({
   };
 
   const startQuiz = () => {
-    if (
-      !userDetails.name ||
-      !userDetails.rollNumber ||
-      !userDetails.faculty ||
-      !userDetails.year
-    ) {
-      toast.error("Please fill in all details");
-      return;
+    if (!isAdmin) {
+      if (
+        !userDetails.name ||
+        !userDetails.rollNumber ||
+        !userDetails.faculty ||
+        !userDetails.year
+      ) {
+        toast.error("Please fill in all details");
+        return;
+      }
     }
 
     setQuizState("active");
-    if (quiz?.timeLimit) {
+    if (quiz?.timeLimit && !isAdmin) {
       setTimeLeft(quiz.timeLimit * 60);
     }
   };
@@ -218,6 +223,11 @@ export default function QuizPage({
     if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
 
     setQuizState("completed");
+
+    if (isAdmin) {
+      toast.info("Quiz completed (Admin Mode - No submission saved)");
+      return;
+    }
 
     try {
       await fetch("/api/submissions", {
@@ -286,89 +296,118 @@ export default function QuizPage({
         <Card className="w-full max-w-md bg-slate-900 border-slate-800 text-slate-200">
           <CardHeader>
             <CardTitle className="text-2xl text-cyan-400">
-              Enter Details
+              {isAdmin ? "Admin Preview" : "Enter Details"}
             </CardTitle>
             <CardDescription>
-              Please provide your information to start the quiz.
+              {isAdmin
+                ? "You are entering admin preview mode."
+                : "Please provide your information to start the quiz."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                value={userDetails.name}
-                onChange={(e) =>
-                  setUserDetails({ ...userDetails, name: e.target.value })
-                }
-                placeholder="John Doe"
-                className="bg-slate-950 border-slate-700"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={userDetails.email}
-                onChange={(e) =>
-                  setUserDetails({ ...userDetails, email: e.target.value })
-                }
-                placeholder="john@example.com"
-                className="bg-slate-950 border-slate-700"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="roll">Roll Number</Label>
-              <Input
-                id="roll"
-                value={userDetails.rollNumber}
-                onChange={(e) =>
-                  setUserDetails({ ...userDetails, rollNumber: e.target.value })
-                }
-                placeholder="KAN077BCT001"
-                className="bg-slate-950 border-slate-700"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Faculty</Label>
-                <Select
-                  onValueChange={(val) =>
-                    setUserDetails({ ...userDetails, faculty: val })
-                  }
-                >
-                  <SelectTrigger className="bg-slate-950 border-slate-700">
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BCT">BCT</SelectItem>
-                    <SelectItem value="BEI">BEI</SelectItem>
-                    <SelectItem value="BCE">BCE</SelectItem>
-                    <SelectItem value="BEL">BEL</SelectItem>
-                  </SelectContent>
-                </Select>
+            {isAdmin ? (
+              <div className="bg-cyan-950/50 border border-cyan-800 p-4 rounded-md text-cyan-200">
+                <p className="font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5" /> Admin Mode Active
+                </p>
+                <p className="text-sm mt-1">
+                  You can start this quiz immediately. No student details are
+                  required, and no submission will be recorded.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label>Year (Batch)</Label>
-                <Input
-                  type="number"
-                  placeholder="2075"
-                  value={userDetails.year}
-                  onChange={(e) =>
-                    setUserDetails({ ...userDetails, year: e.target.value })
-                  }
-                  className="bg-slate-950 border-slate-700"
-                />
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="name">Full Name</Label>
+                  <Input
+                    id="name"
+                    value={userDetails.name}
+                    onChange={(e) =>
+                      setUserDetails({ ...userDetails, name: e.target.value })
+                    }
+                    placeholder="John Doe"
+                    className="bg-slate-950 border-slate-700"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={userDetails.email}
+                    onChange={(e) =>
+                      setUserDetails({ ...userDetails, email: e.target.value })
+                    }
+                    placeholder="john@example.com"
+                    className="bg-slate-950 border-slate-700"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="roll">Roll Number</Label>
+                  <Input
+                    id="roll"
+                    value={userDetails.rollNumber}
+                    onChange={(e) =>
+                      setUserDetails({
+                        ...userDetails,
+                        rollNumber: e.target.value,
+                      })
+                    }
+                    placeholder="KAN077BCT001"
+                    className="bg-slate-950 border-slate-700"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Faculty</Label>
+                    <Select
+                      onValueChange={(val) =>
+                        setUserDetails({ ...userDetails, faculty: val })
+                      }
+                    >
+                      <SelectTrigger className="bg-slate-950 border-slate-700">
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="BCT">BCT</SelectItem>
+                        <SelectItem value="BEI">BEI</SelectItem>
+                        <SelectItem value="BCE">BCE</SelectItem>
+                        <SelectItem value="BEL">BEL</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Year (Batch - BS)</Label>
+                    <Select
+                      value={userDetails.year}
+                      onValueChange={(val) =>
+                        setUserDetails({ ...userDetails, year: val })
+                      }
+                    >
+                      <SelectTrigger className="bg-slate-950 border-slate-700">
+                        <SelectValue placeholder="Select Year" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[200px]">
+                        {Array.from({ length: 16 }, (_, i) => 2070 + i).map(
+                          (year) => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
           </CardContent>
           <CardFooter>
             <Button
               onClick={startQuiz}
               className="w-full bg-cyan-600 hover:bg-cyan-700 text-white"
             >
-              Start Quiz
+              {isAdmin ? "Start Preview" : "Start Quiz"}
             </Button>
           </CardFooter>
         </Card>
@@ -426,7 +465,7 @@ export default function QuizPage({
             {userDetails.name} | {userDetails.rollNumber}
           </span>
         </div>
-        {quiz?.timeLimit && (
+        {quiz?.timeLimit && !isAdmin && (
           <div
             className={`flex items-center gap-2 font-mono text-xl font-bold ${
               timeLeft < 60 ? "text-red-500 animate-pulse" : "text-white"
@@ -434,6 +473,12 @@ export default function QuizPage({
           >
             <Timer className="w-5 h-5" />
             {formatTime(timeLeft)}
+          </div>
+        )}
+        {isAdmin && (
+          <div className="flex items-center gap-2 font-mono text-lg font-bold text-cyan-400">
+            <CheckCircle2 className="w-5 h-5" />
+            Preview Mode
           </div>
         )}
       </div>

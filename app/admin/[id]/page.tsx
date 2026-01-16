@@ -917,15 +917,25 @@ export default function AdminPage({
                     </Select>
                   </div>
                   <div className="space-y-2 w-40">
-                    <Label>Year (Batch)</Label>
-                    <Input
-                      placeholder="2075"
-                      value={viewFilterYear === "all" ? "" : viewFilterYear}
-                      onChange={(e) =>
-                        setViewFilterYear(e.target.value || "all")
-                      }
-                      className="bg-slate-950 border-slate-700"
-                    />
+                    <Label>Year (Batch - BS)</Label>
+                    <Select
+                      value={viewFilterYear}
+                      onValueChange={setViewFilterYear}
+                    >
+                      <SelectTrigger className="bg-slate-950 border-slate-700">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[200px]">
+                        <SelectItem value="all">All</SelectItem>
+                        {Array.from({ length: 16 }, (_, i) => 2070 + i).map(
+                          (year) => (
+                            <SelectItem key={year} value={year.toString()}>
+                              {year}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </CardHeader>
