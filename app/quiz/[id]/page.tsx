@@ -94,6 +94,7 @@ export default function QuizPage({
   const [isCheated, setIsCheated] = useState(false);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     setIsAdmin(isAuthenticated());
@@ -110,7 +111,7 @@ export default function QuizPage({
         toast.warning("Warning: Return to the quiz immediately!");
         blurTimeoutRef.current = setTimeout(() => {
           setIsCheated(true);
-          submitQuiz("timeout"); // Using 'timeout' or we can add a new type 'cheating'
+          submitQuiz("timeout");
           toast.error("Quiz submitted automatically due to inactivity.");
         }, 5000);
       } else {
@@ -129,25 +130,29 @@ export default function QuizPage({
     };
   }, [quizState]);
 
-  // Timer
+  // Timer Tick
   useEffect(() => {
     if (quizState === "active" && timeLeft > 0) {
       timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(timerRef.current!);
-            submitQuiz("timeout");
-            return 0;
-          }
-          return prev - 1;
-        });
+        setTimeLeft((prev) => Math.max(0, prev - 1));
       }, 1000);
     }
-
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [quizState]);
+  }, [quizState, timeLeft > 0]);
+
+  // Timeout Watcher
+  useEffect(() => {
+    if (
+      quizState === "active" &&
+      quiz?.timeLimit &&
+      timeLeft === 0 &&
+      !isAdmin
+    ) {
+      submitQuiz("timeout");
+    }
+  }, [timeLeft, quizState, quiz, isAdmin]);
 
   const fetchQuiz = async () => {
     try {
@@ -182,6 +187,7 @@ export default function QuizPage({
       }
     }
 
+    isSubmittingRef.current = false;
     setQuizState("active");
     if (quiz?.timeLimit && !isAdmin) {
       setTimeLeft(quiz.timeLimit * 60);
@@ -216,7 +222,10 @@ export default function QuizPage({
   };
 
   const submitQuiz = async (type: "manual" | "timeout" = "manual") => {
-    if (!quiz || quizState === "completed") return;
+    // Guard against double submission or stale state calls
+    if (!quiz || quizState === "completed" || isSubmittingRef.current) return;
+
+    isSubmittingRef.current = true;
 
     // Clear timers
     if (timerRef.current) clearInterval(timerRef.current);
@@ -227,6 +236,15 @@ export default function QuizPage({
     if (isAdmin) {
       toast.info("Quiz completed (Admin Mode - No submission saved)");
       return;
+    }
+
+    // Calculate final score including current unsubmitted selection for timeout
+    let finalScore = score;
+    if (type === "timeout" && !isAnswered && selectedAnswer && quiz) {
+      const currentQuestion = quiz.questions[currentQuestionIndex];
+      if (selectedAnswer === currentQuestion.correctAnswer) {
+        finalScore += 1;
+      }
     }
 
     try {
@@ -240,19 +258,21 @@ export default function QuizPage({
           rollNumber: userDetails.rollNumber,
           faculty: userDetails.faculty,
           year: userDetails.year,
-          score: score,
+          score: finalScore,
           // Note: score state is updated by handleAnswerSubmit.
           // For manual submission, the user must have answered the last question (isAnswered=true) to see the Finish button.
           // For timeout, we take the score as is (unsubmitted answers rely on explicit submission).
           totalQuestions: quiz.questions.length,
-          isCheated: isCheated || (type === "timeout" && document.hidden), // simplify check
-          submissionType: type === "timeout" && document.hidden ? "blur" : type,
+          isCheated: isCheated,
+          submissionType: type,
         }),
       });
       toast.success("Quiz submitted successfully!");
     } catch (error) {
       console.error("Submission error", error);
       toast.error("Failed to save submission");
+      // Reset submitting status if it failed severely?
+      // Ideally we shouldn't let them retry if we already showed 'completed'.
     }
   };
 
