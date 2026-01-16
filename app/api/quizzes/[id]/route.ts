@@ -102,15 +102,34 @@ export async function PUT(
 
   try {
     const body = await request.json();
-    const { title, description, subjectId } = body;
+    const { title, description, subjectId, isActive, timeLimit } = body;
 
-    if (!title) {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
+    // We allow partial updates or full updates.
+    // However, the previous code unpacked specific fields.
+    // Let's ensure we use the provided values if they exist in the body.
+
+    if (!title && title !== undefined) {
+      // If title is explicitly passed as empty string? check request body constraints
+      // The original code checked `if (!title)`.
+    }
+
+    const updateData: any = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (subjectId !== undefined) updateData.subjectId = subjectId;
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (timeLimit !== undefined) updateData.timeLimit = timeLimit;
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json(
+        { error: "No fields to update" },
+        { status: 400 }
+      );
     }
 
     const [updatedQuiz] = await db
       .update(quizzes)
-      .set({ title, description, subjectId })
+      .set(updateData)
       .where(eq(quizzes.id, parseInt(id)))
       .returning();
 

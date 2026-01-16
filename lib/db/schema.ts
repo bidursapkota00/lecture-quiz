@@ -1,4 +1,11 @@
-import { pgTable, text, timestamp, serial, integer } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  serial,
+  integer,
+  boolean,
+} from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -21,6 +28,8 @@ export const quizzes = pgTable("quizzes", {
   subjectId: integer("subject_id").references(() => subjects.id),
   userId: integer("user_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
+  timeLimit: integer("time_limit"), // in minutes
+  isActive: boolean("is_active").default(false),
 });
 
 export const questions = pgTable("questions", {
@@ -33,5 +42,22 @@ export const questions = pgTable("questions", {
   correctAnswer: text("correct_answer").notNull(),
   explanation: text("explanation").notNull(),
   order: integer("order").notNull().default(0), // Order of question appearance
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const submissions = pgTable("submissions", {
+  id: serial("id").primaryKey(),
+  quizId: integer("quiz_id").references(() => quizzes.id, {
+    onDelete: "cascade",
+  }),
+  studentName: text("student_name").notNull(),
+  studentEmail: text("student_email").notNull(),
+  rollNumber: text("roll_number").notNull(),
+  faculty: text("faculty").notNull(), // e.g., BCT, BEI
+  year: text("year").notNull(), // e.g., 1st, 2nd
+  score: integer("score").notNull(),
+  totalQuestions: integer("total_questions").notNull(),
+  isCheated: boolean("is_cheated").default(false),
+  submissionType: text("submission_type").notNull(), // 'manual', 'timeout', 'blur'
   createdAt: timestamp("created_at").defaultNow(),
 });

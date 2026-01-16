@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,9 +8,18 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -18,6 +27,8 @@ import {
   ArrowRight,
   RotateCcw,
   ArrowLeft,
+  Timer,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -35,7 +46,19 @@ interface QuizData {
   title: string;
   description: string;
   questions: Question[];
+  timeLimit: number | null; // in minutes
+  isActive: boolean;
 }
+
+interface UserDetails {
+  name: string;
+  email: string;
+  rollNumber: string;
+  faculty: string;
+  year: string;
+}
+
+type QuizState = "loading" | "inactive" | "entry_form" | "active" | "completed";
 
 export default function QuizPage({
   params,
@@ -44,17 +67,84 @@ export default function QuizPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+
+  // Quiz Data & State
   const [quiz, setQuiz] = useState<QuizData | null>(null);
+  const [quizState, setQuizState] = useState<QuizState>("loading");
+
+  // User Details
+  const [userDetails, setUserDetails] = useState<UserDetails>({
+    name: "",
+    email: "",
+    rollNumber: "",
+    faculty: "",
+    year: "",
+  });
+
+  // Quiz Progress
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<string>("");
   const [isAnswered, setIsAnswered] = useState(false);
   const [score, setScore] = useState(0);
-  const [showScore, setShowScore] = useState(false);
-  const [loading, setLoading] = useState(true);
+
+  // Timer & Cheating
+  const [timeLeft, setTimeLeft] = useState<number>(0); // in seconds
+  const [isCheated, setIsCheated] = useState(false);
+  const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     fetchQuiz();
   }, [id]);
+
+  // Cheating detection
+  useEffect(() => {
+    if (quizState !== "active") return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // User left the tab
+        toast.warning("Warning: Return to the quiz immediately!");
+        blurTimeoutRef.current = setTimeout(() => {
+          setIsCheated(true);
+          submitQuiz("timeout"); // Using 'timeout' or we can add a new type 'cheating'
+          toast.error("Quiz submitted automatically due to inactivity.");
+        }, 5000);
+      } else {
+        // User returned
+        if (blurTimeoutRef.current) {
+          clearTimeout(blurTimeoutRef.current);
+          blurTimeoutRef.current = null;
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+    };
+  }, [quizState]);
+
+  // Timer
+  useEffect(() => {
+    if (quizState === "active" && timeLeft > 0) {
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current!);
+            submitQuiz("timeout");
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [quizState]);
 
   const fetchQuiz = async () => {
     try {
@@ -62,14 +152,34 @@ export default function QuizPage({
       if (res.ok) {
         const data = await res.json();
         setQuiz(data);
+        if (!data.isActive) {
+          setQuizState("inactive");
+        } else {
+          setQuizState("entry_form");
+        }
       } else {
         toast.error("Failed to load quiz");
         router.push("/");
       }
     } catch (error) {
       toast.error("An error occurred");
-    } finally {
-      setLoading(false);
+    }
+  };
+
+  const startQuiz = () => {
+    if (
+      !userDetails.name ||
+      !userDetails.rollNumber ||
+      !userDetails.faculty ||
+      !userDetails.year
+    ) {
+      toast.error("Please fill in all details");
+      return;
+    }
+
+    setQuizState("active");
+    if (quiz?.timeLimit) {
+      setTimeLeft(quiz.timeLimit * 60);
     }
   };
 
@@ -96,19 +206,53 @@ export default function QuizPage({
       setIsAnswered(false);
       setSelectedAnswer("");
     } else {
-      setShowScore(true);
+      submitQuiz("manual");
     }
   };
 
-  const restartQuiz = () => {
-    setScore(0);
-    setCurrentQuestionIndex(0);
-    setShowScore(false);
-    setIsAnswered(false);
-    setSelectedAnswer("");
+  const submitQuiz = async (type: "manual" | "timeout" = "manual") => {
+    if (!quiz || quizState === "completed") return;
+
+    // Clear timers
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (blurTimeoutRef.current) clearTimeout(blurTimeoutRef.current);
+
+    setQuizState("completed");
+
+    try {
+      await fetch("/api/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          quizId: parseInt(id),
+          studentName: userDetails.name,
+          studentEmail: userDetails.email,
+          rollNumber: userDetails.rollNumber,
+          faculty: userDetails.faculty,
+          year: userDetails.year,
+          score: score,
+          // Note: score state is updated by handleAnswerSubmit.
+          // For manual submission, the user must have answered the last question (isAnswered=true) to see the Finish button.
+          // For timeout, we take the score as is (unsubmitted answers rely on explicit submission).
+          totalQuestions: quiz.questions.length,
+          isCheated: isCheated || (type === "timeout" && document.hidden), // simplify check
+          submissionType: type === "timeout" && document.hidden ? "blur" : type,
+        }),
+      });
+      toast.success("Quiz submitted successfully!");
+    } catch (error) {
+      console.error("Submission error", error);
+      toast.error("Failed to save submission");
+    }
   };
 
-  if (loading) {
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  if (quizState === "loading") {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
         Loading...
@@ -116,17 +260,19 @@ export default function QuizPage({
     );
   }
 
-  if (!quiz || quiz.questions.length === 0) {
+  if (quizState === "inactive") {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-4">
-        <h2 className="text-2xl font-bold mb-4">
-          No questions available for this lecture.
+        <h2 className="text-2xl font-bold mb-4 text-center">
+          Wait for the instructor to start the quiz.
         </h2>
-        <Link href={`/admin/${id}`}>
-          <Button variant="outline" className="border-cyan-600 text-cyan-400">
-            Add Questions
-          </Button>
-        </Link>
+        <Button
+          onClick={() => window.location.reload()}
+          variant="outline"
+          className="border-cyan-600 text-cyan-400"
+        >
+          Refresh Page
+        </Button>
         <Link href="/" className="mt-4 text-slate-400 hover:text-white">
           Back to Home
         </Link>
@@ -134,7 +280,103 @@ export default function QuizPage({
     );
   }
 
-  if (showScore) {
+  if (quizState === "entry_form") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md bg-slate-900 border-slate-800 text-slate-200">
+          <CardHeader>
+            <CardTitle className="text-2xl text-cyan-400">
+              Enter Details
+            </CardTitle>
+            <CardDescription>
+              Please provide your information to start the quiz.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Full Name</Label>
+              <Input
+                id="name"
+                value={userDetails.name}
+                onChange={(e) =>
+                  setUserDetails({ ...userDetails, name: e.target.value })
+                }
+                placeholder="John Doe"
+                className="bg-slate-950 border-slate-700"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={userDetails.email}
+                onChange={(e) =>
+                  setUserDetails({ ...userDetails, email: e.target.value })
+                }
+                placeholder="john@example.com"
+                className="bg-slate-950 border-slate-700"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="roll">Roll Number</Label>
+              <Input
+                id="roll"
+                value={userDetails.rollNumber}
+                onChange={(e) =>
+                  setUserDetails({ ...userDetails, rollNumber: e.target.value })
+                }
+                placeholder="KAN077BCT001"
+                className="bg-slate-950 border-slate-700"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Faculty</Label>
+                <Select
+                  onValueChange={(val) =>
+                    setUserDetails({ ...userDetails, faculty: val })
+                  }
+                >
+                  <SelectTrigger className="bg-slate-950 border-slate-700">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BCT">BCT</SelectItem>
+                    <SelectItem value="BEI">BEI</SelectItem>
+                    <SelectItem value="BCE">BCE</SelectItem>
+                    <SelectItem value="BEL">BEL</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Year (Batch)</Label>
+                <Input
+                  type="number"
+                  placeholder="2075"
+                  value={userDetails.year}
+                  onChange={(e) =>
+                    setUserDetails({ ...userDetails, year: e.target.value })
+                  }
+                  className="bg-slate-950 border-slate-700"
+                />
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter>
+            <Button
+              onClick={startQuiz}
+              className="w-full bg-cyan-600 hover:bg-cyan-700 text-white"
+            >
+              Start Quiz
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  if (quizState === "completed") {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <Card className="w-full max-w-md bg-slate-900 border-slate-800 text-slate-200">
@@ -145,25 +387,25 @@ export default function QuizPage({
           </CardHeader>
           <CardContent className="text-center space-y-4">
             <div className="text-6xl font-bold text-white">
-              {score} / {quiz.questions.length}
+              {score} / {quiz?.questions.length}
             </div>
             <p className="text-slate-400">
-              You scored {Math.round((score / quiz.questions.length) * 100)}%
+              You scored{" "}
+              {quiz && Math.round((score / quiz.questions.length) * 100)}%
             </p>
+            {isCheated && (
+              <div className="flex items-center justify-center gap-2 text-red-500 font-bold bg-red-950/20 p-2 rounded">
+                <AlertTriangle size={20} /> Flgged for suspicious activity
+              </div>
+            )}
           </CardContent>
           <CardFooter className="flex justify-center gap-4">
-            <Button
-              onClick={restartQuiz}
-              className="bg-cyan-600 hover:bg-cyan-700 text-white"
-            >
-              <RotateCcw className="mr-2 h-4 w-4" /> Restart
-            </Button>
             <Link href="/">
               <Button
                 variant="outline"
                 className="border-slate-700 text-slate-800 hover:bg-slate-200"
               >
-                Home
+                Back to Home
               </Button>
             </Link>
           </CardFooter>
@@ -172,31 +414,39 @@ export default function QuizPage({
     );
   }
 
-  const currentQuestion = quiz.questions[currentQuestionIndex];
-
+  // Active Quiz View
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center p-4 pt-10">
-      <div className="w-full max-w-2xl mb-6 flex justify-between items-center">
-        <Link
-          href="/"
-          className="inline-flex items-center text-slate-400 hover:text-cyan-400 transition-colors"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Link>
-        <h2 className="text-xl font-bold text-cyan-400 truncate max-w-[200px] md:max-w-md">
-          {quiz.title}
-        </h2>
+      <div className="w-full max-w-2xl mb-6 flex justify-between items-center bg-slate-900/50 p-4 rounded-lg border border-slate-800">
+        <div className="flex flex-col">
+          <h2 className="text-xl font-bold text-cyan-400 truncate max-w-[200px]">
+            {quiz?.title}
+          </h2>
+          <span className="text-sm text-slate-400">
+            {userDetails.name} | {userDetails.rollNumber}
+          </span>
+        </div>
+        {quiz?.timeLimit && (
+          <div
+            className={`flex items-center gap-2 font-mono text-xl font-bold ${
+              timeLeft < 60 ? "text-red-500 animate-pulse" : "text-white"
+            }`}
+          >
+            <Timer className="w-5 h-5" />
+            {formatTime(timeLeft)}
+          </div>
+        )}
       </div>
 
       <Card className="w-full max-w-2xl bg-slate-900 border-slate-800 text-slate-200 shadow-xl shadow-cyan-900/10">
         <CardHeader>
           <div className="flex justify-between items-center mb-2">
             <span className="text-sm font-medium text-cyan-500 uppercase tracking-wider">
-              Question {currentQuestionIndex + 1} of {quiz.questions.length}
+              Question {currentQuestionIndex + 1} of {quiz?.questions.length}
             </span>
           </div>
           <CardTitle className="text-xl md:text-2xl leading-relaxed text-white">
-            {currentQuestion.text}
+            {quiz?.questions[currentQuestionIndex].text}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -206,62 +456,73 @@ export default function QuizPage({
             disabled={isAnswered}
             className="space-y-3"
           >
-            {currentQuestion.options.map((option, index) => {
-              let itemClass =
-                "flex items-center space-x-3 p-4 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 transition-colors";
-              if (isAnswered) {
-                if (option === currentQuestion.correctAnswer) {
-                  itemClass =
-                    "flex items-center space-x-3 p-4 rounded-lg border border-green-500/50 bg-green-950/30 cursor-default";
-                } else if (
-                  option === selectedAnswer &&
-                  option !== currentQuestion.correctAnswer
-                ) {
-                  itemClass =
-                    "flex items-center space-x-3 p-4 rounded-lg border border-red-500/50 bg-red-950/30 cursor-default";
-                } else {
-                  itemClass =
-                    "flex items-center space-x-3 p-4 rounded-lg border border-slate-800 opacity-50 cursor-default";
-                }
-              } else if (selectedAnswer === option) {
-                itemClass =
-                  "flex items-center space-x-3 p-4 rounded-lg border border-cyan-500 bg-cyan-950/30 cursor-pointer";
-              }
-
-              return (
-                <div
-                  key={index}
-                  className={itemClass}
-                  onClick={() => !isAnswered && setSelectedAnswer(option)}
-                >
-                  <RadioGroupItem
-                    value={option}
-                    id={`option-${index}`}
-                    className="border-slate-500 text-cyan-500"
-                  />
-                  <Label
-                    htmlFor={`option-${index}`}
-                    className="flex-grow cursor-pointer text-base"
-                  >
-                    {option}
-                  </Label>
-                  {isAnswered && option === currentQuestion.correctAnswer && (
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                  )}
-                  {isAnswered &&
+            {quiz?.questions[currentQuestionIndex].options.map(
+              (option, index) => {
+                let itemClass =
+                  "flex items-center space-x-3 p-4 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800 transition-colors";
+                if (isAnswered) {
+                  if (
+                    option ===
+                    quiz?.questions[currentQuestionIndex].correctAnswer
+                  ) {
+                    itemClass =
+                      "flex items-center space-x-3 p-4 rounded-lg border border-green-500/50 bg-green-950/30 cursor-default";
+                  } else if (
                     option === selectedAnswer &&
-                    option !== currentQuestion.correctAnswer && (
-                      <XCircle className="h-5 w-5 text-red-500" />
-                    )}
-                </div>
-              );
-            })}
+                    option !==
+                      quiz?.questions[currentQuestionIndex].correctAnswer
+                  ) {
+                    itemClass =
+                      "flex items-center space-x-3 p-4 rounded-lg border border-red-500/50 bg-red-950/30 cursor-default";
+                  } else {
+                    itemClass =
+                      "flex items-center space-x-3 p-4 rounded-lg border border-slate-800 opacity-50 cursor-default";
+                  }
+                } else if (selectedAnswer === option) {
+                  itemClass =
+                    "flex items-center space-x-3 p-4 rounded-lg border border-cyan-500 bg-cyan-950/30 cursor-pointer";
+                }
+
+                return (
+                  <div
+                    key={index}
+                    className={itemClass}
+                    onClick={() => !isAnswered && setSelectedAnswer(option)}
+                  >
+                    <RadioGroupItem
+                      value={option}
+                      id={`option-${index}`}
+                      className="border-slate-500 text-cyan-500"
+                    />
+                    <Label
+                      htmlFor={`option-${index}`}
+                      className="flex-grow cursor-pointer text-base"
+                    >
+                      {option}
+                    </Label>
+                    {isAnswered &&
+                      option ===
+                        quiz?.questions[currentQuestionIndex].correctAnswer && (
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      )}
+                    {isAnswered &&
+                      option === selectedAnswer &&
+                      option !==
+                        quiz?.questions[currentQuestionIndex].correctAnswer && (
+                        <XCircle className="h-5 w-5 text-red-500" />
+                      )}
+                  </div>
+                );
+              }
+            )}
           </RadioGroup>
 
           {isAnswered && (
             <div className="mt-6 p-4 bg-slate-950/50 rounded-lg border border-slate-800 animate-in fade-in slide-in-from-top-2">
               <h4 className="font-semibold text-cyan-400 mb-1">Explanation:</h4>
-              <p className="text-slate-300">{currentQuestion.explanation}</p>
+              <p className="text-slate-300">
+                {quiz?.questions[currentQuestionIndex].explanation}
+              </p>
             </div>
           )}
         </CardContent>
@@ -279,12 +540,12 @@ export default function QuizPage({
               onClick={handleNextQuestion}
               className="bg-slate-100 hover:bg-white text-slate-900 w-full md:w-auto font-bold"
             >
-              {currentQuestionIndex < quiz.questions.length - 1 ? (
+              {currentQuestionIndex < (quiz?.questions.length || 0) - 1 ? (
                 <>
                   Next Question <ArrowRight className="ml-2 h-4 w-4" />
                 </>
               ) : (
-                "See Results"
+                "Finish Quiz"
               )}
             </Button>
           )}
